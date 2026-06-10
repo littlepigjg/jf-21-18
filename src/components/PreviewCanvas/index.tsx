@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { processFrame } from '@/utils/frameProcessor';
+import type { BeatPoint } from '@/types';
 
 export default function PreviewCanvas() {
   const {
@@ -17,6 +18,11 @@ export default function PreviewCanvas() {
     canvasHeight,
     selectedFrameIndex,
     setSelectedFrameIndex,
+    audioTrack,
+    audioCurrentTime,
+    audioIsPlaying,
+    setAudioIsPlaying,
+    beatSyncConfig,
   } = useEditorStore();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -24,8 +30,73 @@ export default function PreviewCanvas() {
   const lastFrameTimeRef = useRef<number>(0);
   const accumulatedTimeRef = useRef<number>(0);
   const [zoom, setZoom] = useState(1);
+  const [activeBeat, setActiveBeat] = useState<BeatPoint | null>(null);
+  const beatFlashRef = useRef<number>(0);
+  const lastBeatIndexRef = useRef<number>(-1);
+
+  const getFrameIndexAtTime = useCallback((time: number): number => {
+    if (frames.length === 0) return 0;
+    let accumulated = 0;
+    for (let i = 0; i < frames.length; i++) {
+      accumulated += frames[i].delay;
+      if (accumulated >= time * 1000) {
+        return i;
+      }
+    }
+    return frames.length - 1;
+  }, [frames]);
+
+  const findBeatAtTime = useCallback((time: number): BeatPoint | null => {
+    if (!audioTrack?.analysis?.beats) return null;
+    const { beats } = audioTrack.analysis;
+    const threshold = 0.05;
+    for (let i = 0; i < beats.length; i++) {
+      if (Math.abs(beats[i].time - time) < threshold) {
+        if (beatSyncConfig.beatType === 'all' || beats[i].frequency === beatSyncConfig.beatType) {
+          if (i !== lastBeatIndexRef.current) {
+            lastBeatIndexRef.current = i;
+            return beats[i];
+          }
+        }
+      }
+    }
+    return null;
+  }, [audioTrack, beatSyncConfig.beatType]);
 
   useEffect(() => {
+    if (audioIsPlaying && audioTrack?.analysis) {
+      const beat = findBeatAtTime(audioCurrentTime);
+      if (beat) {
+        setActiveBeat(beat);
+        beatFlashRef.current = 1;
+        if (beatSyncConfig.markKeyframes) {
+          const frameIdx = getFrameIndexAtTime(audioCurrentTime);
+          if (frameIdx !== currentFrameIndex) {
+            setCurrentFrameIndex(frameIdx);
+            setSelectedFrameIndex(frameIdx);
+          }
+        }
+      }
+    }
+  }, [audioCurrentTime, audioIsPlaying, audioTrack, findBeatAtTime, beatSyncConfig.markKeyframes, getFrameIndexAtTime, currentFrameIndex, setCurrentFrameIndex, setSelectedFrameIndex]);
+
+  useEffect(() => {
+    if (beatFlashRef.current > 0) {
+      const timer = setTimeout(() => {
+        beatFlashRef.current = Math.max(0, beatFlashRef.current - 0.1);
+        if (beatFlashRef.current <= 0) {
+          setActiveBeat(null);
+        }
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [activeBeat]);
+
+  useEffect(() => {
+    if (audioIsPlaying && audioTrack?.analysis && beatSyncConfig.enabled) {
+      return;
+    }
+
     if (!isPlaying || frames.length === 0) {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
@@ -63,7 +134,17 @@ export default function PreviewCanvas() {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isPlaying, frames, currentFrameIndex, playbackSpeed, setCurrentFrameIndex, setSelectedFrameIndex]);
+  }, [isPlaying, frames, currentFrameIndex, playbackSpeed, setCurrentFrameIndex, setSelectedFrameIndex, audioIsPlaying, audioTrack, beatSyncConfig.enabled]);
+
+  useEffect(() => {
+    if (audioIsPlaying && audioTrack?.analysis && beatSyncConfig.enabled) {
+      const frameIdx = getFrameIndexAtTime(audioCurrentTime);
+      if (frameIdx !== currentFrameIndex) {
+        setCurrentFrameIndex(frameIdx);
+        setSelectedFrameIndex(frameIdx);
+      }
+    }
+  }, [audioCurrentTime, audioIsPlaying, audioTrack, beatSyncConfig.enabled, getFrameIndexAtTime, currentFrameIndex, setCurrentFrameIndex, setSelectedFrameIndex]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -83,14 +164,54 @@ export default function PreviewCanvas() {
     canvas.width = processedData.width;
     canvas.height = processedData.height;
     ctx.putImageData(processedData, 0, 0);
-  }, [currentFrameIndex, frames, captions, crop]);
+
+    if (activeBeat && beatSyncConfig.effectOnBeat !== 'none') {
+      const alpha = beatFlashRef.current * 0.5 * activeBeat.strength;
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-over';
+
+      switch (beatSyncConfig.effectOnBeat) {
+        case 'flash':
+          ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          break;
+        case 'shake':
+          const shakeX = (Math.random() - 0.5) * 8 * activeBeat.strength;
+          const shakeY = (Math.random() - 0.5) * 8 * activeBeat.strength;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.putImageData(processedData, shakeX, shakeY);
+          break;
+        case 'zoom':
+          const scale = 1 + 0.1 * activeBeat.strength;
+          const scaledWidth = canvas.width * scale;
+          const scaledHeight = canvas.height * scale;
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = canvas.width;
+          tempCanvas.height = canvas.height;
+          const tempCtx = tempCanvas.getContext('2d');
+          if (tempCtx) {
+            tempCtx.putImageData(processedData, 0, 0);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(
+              tempCanvas,
+              (canvas.width - scaledWidth) / 2,
+              (canvas.height - scaledHeight) / 2,
+              scaledWidth,
+              scaledHeight
+            );
+          }
+          break;
+      }
+      ctx.restore();
+    }
+  }, [currentFrameIndex, frames, captions, crop, activeBeat, beatSyncConfig.effectOnBeat]);
 
   const handleCanvasClick = () => {
-    if (frames.length === 0) return;
-    if (isPlaying) {
-      setIsPlaying(false);
-    } else {
-      setIsPlaying(true);
+    if (frames.length === 0 && !audioTrack) return;
+    const newPlaying = !isPlaying;
+    setIsPlaying(newPlaying);
+    if (audioTrack) {
+      setAudioIsPlaying(newPlaying);
     }
   };
 

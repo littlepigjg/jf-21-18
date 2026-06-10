@@ -4,6 +4,7 @@ import PreviewCanvas from '@/components/PreviewCanvas';
 import PropertyPanel from '@/components/PropertyPanel';
 import ImportDialog from '@/components/ImportDialog';
 import ExportDialog from '@/components/ExportDialog';
+import AudioWaveform from '@/components/AudioWaveform';
 import { useEditorStore } from '@/stores/editorStore';
 
 export default function Home() {
@@ -17,6 +18,7 @@ export default function Home() {
         <PreviewCanvas />
         <PropertyPanel />
       </div>
+      <AudioWaveform />
       <ImportDialog open={showImportDialog} onClose={() => setShowImportDialog(false)} />
       <ExportDialog open={showExportDialog} onClose={() => setShowExportDialog(false)} />
     </div>

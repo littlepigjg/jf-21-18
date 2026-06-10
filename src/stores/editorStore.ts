@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Frame, Caption, CropConfig, ExportConfig } from '@/types';
+import type { Frame, Caption, CropConfig, ExportConfig, AudioTrack, BeatSyncConfig, AudioAnalysis } from '@/types';
 import { generateId, cloneImageData, createBlankImageData } from '@/utils/imageUtils';
 
 interface EditorStore {
@@ -15,6 +15,10 @@ interface EditorStore {
   canvasHeight: number;
   showImportDialog: boolean;
   showExportDialog: boolean;
+  audioTrack: AudioTrack | null;
+  audioCurrentTime: number;
+  beatSyncConfig: BeatSyncConfig;
+  audioIsPlaying: boolean;
 
   setFrames: (frames: Frame[]) => void;
   setSelectedFrameIndex: (index: number) => void;
@@ -38,6 +42,15 @@ interface EditorStore {
   setCrop: (crop: Partial<CropConfig>) => void;
   setExportConfig: (config: Partial<ExportConfig>) => void;
 
+  setAudioTrack: (track: AudioTrack | null) => void;
+  setAudioAnalysis: (analysis: AudioAnalysis) => void;
+  setAudioCurrentTime: (time: number) => void;
+  setAudioIsPlaying: (playing: boolean) => void;
+  setAudioVolume: (volume: number) => void;
+  setAudioMuted: (muted: boolean) => void;
+  setBeatSyncConfig: (config: Partial<BeatSyncConfig>) => void;
+  removeAudioTrack: () => void;
+
   clearAll: () => void;
 }
 
@@ -59,6 +72,15 @@ const defaultExportConfig: ExportConfig = {
   height: 0,
 };
 
+const defaultBeatSyncConfig: BeatSyncConfig = {
+  enabled: false,
+  sensitivity: 0.7,
+  beatType: 'low',
+  effectOnBeat: 'flash',
+  autoAdjustDelay: true,
+  markKeyframes: true,
+};
+
 export const useEditorStore = create<EditorStore>((set, get) => ({
   frames: [],
   selectedFrameIndex: -1,
@@ -72,6 +94,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   canvasHeight: 480,
   showImportDialog: false,
   showExportDialog: false,
+  audioTrack: null,
+  audioCurrentTime: 0,
+  beatSyncConfig: defaultBeatSyncConfig,
+  audioIsPlaying: false,
 
   setFrames: (frames) => {
     if (frames.length > 0) {
@@ -219,7 +245,41 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   setCrop: (crop) => set({ crop: { ...get().crop, ...crop } }),
   setExportConfig: (config) => set({ exportConfig: { ...get().exportConfig, ...config } }),
 
-  clearAll: () =>
+  setAudioTrack: (track) => set({ audioTrack: track, audioCurrentTime: 0, audioIsPlaying: false }),
+  setAudioAnalysis: (analysis) => {
+    const state = get();
+    if (state.audioTrack) {
+      set({ audioTrack: { ...state.audioTrack, analysis } });
+    }
+  },
+  setAudioCurrentTime: (time) => set({ audioCurrentTime: time }),
+  setAudioIsPlaying: (playing) => set({ audioIsPlaying: playing }),
+  setAudioVolume: (volume) => {
+    const state = get();
+    if (state.audioTrack) {
+      set({ audioTrack: { ...state.audioTrack, volume: Math.max(0, Math.min(1, volume)) } });
+    }
+  },
+  setAudioMuted: (muted) => {
+    const state = get();
+    if (state.audioTrack) {
+      set({ audioTrack: { ...state.audioTrack, muted } });
+    }
+  },
+  setBeatSyncConfig: (config) => set({ beatSyncConfig: { ...get().beatSyncConfig, ...config } }),
+  removeAudioTrack: () => {
+    const state = get();
+    if (state.audioTrack) {
+      URL.revokeObjectURL(state.audioTrack.url);
+    }
+    set({ audioTrack: null, audioCurrentTime: 0, audioIsPlaying: false });
+  },
+
+  clearAll: () => {
+    const state = get();
+    if (state.audioTrack) {
+      URL.revokeObjectURL(state.audioTrack.url);
+    }
     set({
       frames: [],
       selectedFrameIndex: -1,
@@ -229,5 +289,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       currentFrameIndex: 0,
       showImportDialog: false,
       showExportDialog: false,
-    }),
+      audioTrack: null,
+      audioCurrentTime: 0,
+      audioIsPlaying: false,
+      beatSyncConfig: defaultBeatSyncConfig,
+    });
+  },
 }));

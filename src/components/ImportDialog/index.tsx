@@ -1,10 +1,11 @@
 import { useState, useRef } from 'react';
-import { X, Upload, FileImage, Film, Images, Loader2 } from 'lucide-react';
+import { X, Upload, FileImage, Film, Images, Loader2, Music } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { decodeGif } from '@/utils/gifDecoder';
 import { loadImageFromFile, imageElementToImageData, generateId } from '@/utils/imageUtils';
 import { extractFramesFromVideo } from '@/utils/videoExtractor';
-import type { Frame } from '@/types';
+import { analyzeAudio } from '@/utils/audioAnalyzer';
+import type { Frame, AudioTrack } from '@/types';
 import { cn } from '@/lib/utils';
 
 interface ImportDialogProps {
@@ -12,10 +13,12 @@ interface ImportDialogProps {
   onClose: () => void;
 }
 
-type ImportMode = 'gif' | 'video' | 'images';
+type ImportMode = 'gif' | 'video' | 'images' | 'audio';
 
 export default function ImportDialog({ open, onClose }: ImportDialogProps) {
   const setFrames = useEditorStore((s) => s.setFrames);
+  const setAudioTrack = useEditorStore((s) => s.setAudioTrack);
+  const setAudioAnalysis = useEditorStore((s) => s.setAudioAnalysis);
   const [mode, setMode] = useState<ImportMode>('gif');
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -25,6 +28,7 @@ export default function ImportDialog({ open, onClose }: ImportDialogProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const imagesInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
 
   if (!open) return null;
 
@@ -32,6 +36,37 @@ export default function ImportDialog({ open, onClose }: ImportDialogProps) {
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (videoInputRef.current) videoInputRef.current.value = '';
     if (imagesInputRef.current) imagesInputRef.current.value = '';
+    if (audioInputRef.current) audioInputRef.current.value = '';
+  };
+
+  const handleAudioImport = async (file: File) => {
+    setLoading(true);
+    setError('');
+    setProgress(0);
+    try {
+      const url = URL.createObjectURL(file);
+      const track: AudioTrack = {
+        id: generateId(),
+        name: file.name,
+        url,
+        file,
+        analysis: null,
+        volume: 1,
+        muted: false,
+      };
+      setAudioTrack(track);
+
+      const analysis = await analyzeAudio(file, setProgress);
+      setAudioAnalysis(analysis);
+
+      onClose();
+    } catch (err) {
+      setError('音频分析失败，请确保文件格式正确');
+      console.error(err);
+    } finally {
+      setLoading(false);
+      resetInputs();
+    }
   };
 
   const handleGifImport = async (file: File) => {
@@ -126,6 +161,8 @@ export default function ImportDialog({ open, onClose }: ImportDialogProps) {
       handleVideoImport(files[0]);
     } else if (mode === 'images') {
       handleImagesImport(files);
+    } else if (mode === 'audio') {
+      handleAudioImport(files[0]);
     }
   };
 
@@ -143,11 +180,12 @@ export default function ImportDialog({ open, onClose }: ImportDialogProps) {
         </div>
 
         <div className="p-5 space-y-5">
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             {[
               { key: 'gif', label: 'GIF 文件', icon: FileImage, accept: '.gif' },
               { key: 'video', label: '视频文件', icon: Film, accept: '.mp4,.webm,.mov,.avi' },
               { key: 'images', label: '图片序列', icon: Images, accept: 'image/*' },
+              { key: 'audio', label: '音频文件', icon: Music, accept: '.mp3,.wav,.ogg,.m4a,.flac,audio/*' },
             ].map((item) => (
               <button
                 key={item.key}
@@ -199,11 +237,24 @@ export default function ImportDialog({ open, onClose }: ImportDialogProps) {
             </div>
           )}
 
+          {mode === 'audio' && (
+            <div className="bg-slate-800/50 rounded-xl p-4 space-y-2">
+              <div className="flex items-center gap-2 text-sm text-slate-300">
+                <Music className="w-4 h-4 text-violet-400" />
+                <span>音频将自动分析波形和节拍点，用于音画同步</span>
+              </div>
+              <p className="text-xs text-slate-500">
+                支持 MP3、WAV、OGG、M4A、FLAC 等常见音频格式
+              </p>
+            </div>
+          )}
+
           <div
             onClick={() => {
               if (mode === 'gif') fileInputRef.current?.click();
               else if (mode === 'video') videoInputRef.current?.click();
-              else imagesInputRef.current?.click();
+              else if (mode === 'images') imagesInputRef.current?.click();
+              else if (mode === 'audio') audioInputRef.current?.click();
             }}
             className="border-2 border-dashed border-slate-600 hover:border-violet-500 rounded-xl p-8 text-center cursor-pointer transition-colors group"
           >
@@ -226,6 +277,7 @@ export default function ImportDialog({ open, onClose }: ImportDialogProps) {
                   {mode === 'gif' && '支持 .gif 格式'}
                   {mode === 'video' && '支持 .mp4, .webm, .mov, .avi 格式'}
                   {mode === 'images' && '支持 PNG, JPG, WebP 等图片格式，可多选'}
+                  {mode === 'audio' && '支持 MP3, WAV, OGG, M4A, FLAC 等音频格式'}
                 </p>
               </>
             )}
@@ -258,6 +310,14 @@ export default function ImportDialog({ open, onClose }: ImportDialogProps) {
             type="file"
             accept="image/*"
             multiple
+            className="hidden"
+            onChange={handleFileChange}
+            disabled={loading}
+          />
+          <input
+            ref={audioInputRef}
+            type="file"
+            accept=".mp3,.wav,.ogg,.m4a,.flac,audio/*"
             className="hidden"
             onChange={handleFileChange}
             disabled={loading}

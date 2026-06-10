@@ -39,6 +39,45 @@ export interface ExportConfig {
   height: number;
 }
 
+export interface BeatPoint {
+  time: number;
+  strength: number;
+  frequency: 'low' | 'mid' | 'high';
+}
+
+export interface AudioAnalysis {
+  duration: number;
+  sampleRate: number;
+  waveformData: Float32Array;
+  waveformPeaks: number[];
+  beats: BeatPoint[];
+  bpm: number;
+  frequencyBands: {
+    low: number[];
+    mid: number[];
+    high: number[];
+  };
+}
+
+export interface AudioTrack {
+  id: string;
+  name: string;
+  url: string;
+  file: File;
+  analysis: AudioAnalysis | null;
+  volume: number;
+  muted: boolean;
+}
+
+export interface BeatSyncConfig {
+  enabled: boolean;
+  sensitivity: number;
+  beatType: 'low' | 'mid' | 'high' | 'all';
+  effectOnBeat: 'none' | 'flash' | 'shake' | 'zoom' | 'custom';
+  autoAdjustDelay: boolean;
+  markKeyframes: boolean;
+}
+
 export interface EditorState {
   frames: Frame[];
   selectedFrameIndex: number;
@@ -50,4 +89,8 @@ export interface EditorState {
   currentFrameIndex: number;
   canvasWidth: number;
   canvasHeight: number;
+  audioTrack: AudioTrack | null;
+  audioCurrentTime: number;
+  beatSyncConfig: BeatSyncConfig;
+  audioIsPlaying: boolean;
 }

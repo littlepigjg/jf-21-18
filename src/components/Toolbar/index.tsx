@@ -17,6 +17,9 @@ export default function Toolbar() {
     frames,
     isPlaying,
     setIsPlaying,
+    audioTrack,
+    audioIsPlaying,
+    setAudioIsPlaying,
     currentFrameIndex,
     setCurrentFrameIndex,
     setShowImportDialog,
@@ -39,8 +42,12 @@ export default function Toolbar() {
   };
 
   const togglePlay = () => {
-    if (frames.length === 0) return;
-    setIsPlaying(!isPlaying);
+    if (frames.length === 0 && !audioTrack) return;
+    const newPlaying = !isPlaying;
+    setIsPlaying(newPlaying);
+    if (audioTrack) {
+      setAudioIsPlaying(newPlaying);
+    }
   };
 
   return (

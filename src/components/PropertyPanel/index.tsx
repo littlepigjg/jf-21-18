@@ -8,9 +8,12 @@ import {
   Plus,
   Trash2,
   Clock,
+  Music,
+  Zap,
 } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import type { Caption } from '@/types';
+import { applyBeatSyncToFrames } from '@/utils/audioAnalyzer';
 import { cn } from '@/lib/utils';
 
 interface PanelSectionProps {
@@ -201,9 +204,15 @@ export default function PropertyPanel() {
     canvasWidth,
     canvasHeight,
     setAllFrameDelays,
+    audioTrack,
+    beatSyncConfig,
+    setBeatSyncConfig,
+    setFrameDelay,
   } = useEditorStore();
 
   const [globalDelay, setGlobalDelay] = useState(100);
+  const [applyingSync, setApplyingSync] = useState(false);
+  const [lastKeyframeCount, setLastKeyframeCount] = useState(0);
 
   return (
     <div className="w-80 bg-slate-900/50 border-l border-slate-700 flex flex-col flex-shrink-0 overflow-y-auto">
@@ -238,6 +247,165 @@ export default function PropertyPanel() {
             应用到所有帧
           </button>
         </div>
+      </PanelSection>
+
+      <PanelSection
+        title="音画同步"
+        icon={<Music className="w-4 h-4 text-pink-400" />}
+        defaultOpen={true}
+      >
+        {!audioTrack ? (
+          <div className="text-center py-4">
+            <Music className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+            <p className="text-xs text-slate-500">请先导入音频文件</p>
+          </div>
+        ) : !audioTrack.analysis ? (
+          <div className="text-center py-4">
+            <div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+            <p className="text-xs text-slate-400">正在分析音频...</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="bg-slate-800/50 rounded-lg p-3 space-y-1">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400">检测到 BPM</span>
+                <span className="text-violet-300 font-mono font-bold">{audioTrack.analysis.bpm}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400">节拍点数</span>
+                <span className="text-cyan-300 font-mono">{audioTrack.analysis.beats.length}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400">音频时长</span>
+                <span className="text-slate-300 font-mono">
+                  {Math.floor(audioTrack.analysis.duration / 60)}:
+                  {Math.floor(audioTrack.analysis.duration % 60).toString().padStart(2, '0')}
+                </span>
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={beatSyncConfig.enabled}
+                onChange={(e) => setBeatSyncConfig({ enabled: e.target.checked })}
+                className="w-4 h-4 rounded border-slate-600 text-pink-600 focus:ring-pink-500 bg-slate-900"
+              />
+              <span className="text-sm text-slate-300">启用音画同步</span>
+            </label>
+
+            <div className={cn('space-y-3', !beatSyncConfig.enabled && 'opacity-50 pointer-events-none')}>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">节拍类型</label>
+                <select
+                  value={beatSyncConfig.beatType}
+                  onChange={(e) =>
+                    setBeatSyncConfig({ beatType: e.target.value as 'low' | 'mid' | 'high' | 'all' })
+                  }
+                  className="w-full px-2 py-1.5 bg-slate-900 border border-slate-600 rounded text-sm text-white focus:outline-none focus:border-pink-500"
+                >
+                  <option value="low">低频 (贝斯/鼓点)</option>
+                  <option value="mid">中频</option>
+                  <option value="high">高频 (镲片)</option>
+                  <option value="all">全部频率</option>
+                </select>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-slate-400">检测灵敏度</label>
+                  <span className="text-xs text-slate-300 font-mono">
+                    {Math.round(beatSyncConfig.sensitivity * 100)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0.1}
+                  max={1}
+                  step={0.05}
+                  value={beatSyncConfig.sensitivity}
+                  onChange={(e) => setBeatSyncConfig({ sensitivity: Number(e.target.value) })}
+                  className="w-full h-1 bg-slate-700 rounded-full appearance-none cursor-pointer accent-pink-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">节拍特效</label>
+                <select
+                  value={beatSyncConfig.effectOnBeat}
+                  onChange={(e) =>
+                    setBeatSyncConfig({
+                      effectOnBeat: e.target.value as 'none' | 'flash' | 'shake' | 'zoom' | 'custom',
+                    })
+                  }
+                  className="w-full px-2 py-1.5 bg-slate-900 border border-slate-600 rounded text-sm text-white focus:outline-none focus:border-pink-500"
+                >
+                  <option value="none">无特效</option>
+                  <option value="flash">闪光</option>
+                  <option value="shake">震动</option>
+                  <option value="zoom">缩放</option>
+                </select>
+              </div>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={beatSyncConfig.markKeyframes}
+                  onChange={(e) => setBeatSyncConfig({ markKeyframes: e.target.checked })}
+                  className="w-4 h-4 rounded border-slate-600 text-pink-600 focus:ring-pink-500 bg-slate-900"
+                />
+                <span className="text-sm text-slate-300">节拍点标记关键帧</span>
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={beatSyncConfig.autoAdjustDelay}
+                  onChange={(e) => setBeatSyncConfig({ autoAdjustDelay: e.target.checked })}
+                  className="w-4 h-4 rounded border-slate-600 text-pink-600 focus:ring-pink-500 bg-slate-900"
+                />
+                <span className="text-sm text-slate-300">自动调整帧时长</span>
+              </label>
+
+              <button
+                onClick={async () => {
+                  if (!audioTrack.analysis || frames.length === 0) return;
+                  setApplyingSync(true);
+                  try {
+                    const { delays, keyframes } = applyBeatSyncToFrames(
+                      audioTrack.analysis.beats,
+                      frames,
+                      exportConfig.fps,
+                      beatSyncConfig.beatType,
+                      beatSyncConfig.autoAdjustDelay
+                    );
+
+                    if (beatSyncConfig.autoAdjustDelay) {
+                      delays.forEach((delay, i) => {
+                        setFrameDelay(i, delay);
+                      });
+                    }
+
+                    setLastKeyframeCount(keyframes.length);
+                  } finally {
+                    setApplyingSync(false);
+                  }
+                }}
+                disabled={frames.length === 0 || applyingSync}
+                className="w-full flex items-center justify-center gap-1.5 py-2 bg-pink-600 hover:bg-pink-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                <Zap className="w-4 h-4" />
+                {applyingSync ? '应用中...' : '应用节拍同步到帧'}
+              </button>
+
+              {lastKeyframeCount > 0 && (
+                <div className="text-center text-xs text-emerald-400">
+                  已标记 {lastKeyframeCount} 个节拍关键帧
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </PanelSection>
 
       <PanelSection
